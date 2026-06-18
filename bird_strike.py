@@ -1,35 +1,60 @@
 # =========================
 # BIBLIOTECAS
 # =========================
+# uso o pandas para manipular os dados em tabelas, o matplotlib para salvar os gráficos
+# e o seaborn para deixar as visualizações com uma aparência mais limpa.
+import os
+
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
 
 # =========================
-# CONFIG
+# CONFIGURAÇÕES GERAIS
 # =========================
+# aqui eu concentro os caminhos das pastas usadas no script.
+# pensei em fazer assim porque facilita mudar a organização do projeto depois,
+# sem precisar procurar caminho de arquivo espalhado pelo código inteiro.
 path = "Recursos/"
+pasta_imagens = "Imagens/"
+pasta_csvs = "CSVs/"
+
+# essas linhas garantem que as pastas de saída existam antes de salvar arquivos.
+# assim o código não quebra caso eu rode o projeto em outro computador.
+os.makedirs(pasta_imagens, exist_ok=True)
+os.makedirs(pasta_csvs, exist_ok=True)
+
+# configurei o tema do seaborn para deixar os gráficos mais adequados para relatório.
+# o whitegrid ajuda na leitura dos valores sem deixar o gráfico visualmente pesado.
 sns.set_theme(style="whitegrid", context="talk")
 
 
 # =========================
 # LEITURA DOS DADOS
 # =========================
+# nesta análise eu uso duas tabelas: a tabela de ocorrências, que possui data e hora,
+# e a tabela de tipos de ocorrência, que permite identificar quais registros são
+# colisões com ave.
 df_ocorrencia = pd.read_csv(path + "ocorrencia.csv", sep=";", encoding="latin1")
 df_tipo = pd.read_csv(path + "ocorrencia_tipo.csv", sep=";", encoding="latin1")
 
 
 # =========================
-# LIMPEZA DAS COLUNAS
+# PADRONIZAÇÃO DOS NOMES DAS COLUNAS
 # =========================
+# removo espaços extras nos nomes das colunas logo no começo.
+# isso evita erro quando eu for acessar uma coluna pelo nome.
 df_ocorrencia.columns = df_ocorrencia.columns.str.strip()
 df_tipo.columns = df_tipo.columns.str.strip()
 
 
 # =========================
-# SELEÇÃO DE COLUNAS
+# SELEÇÃO DAS COLUNAS NECESSÁRIAS
 # =========================
+# aqui eu reduzo a tabela de ocorrências para manter apenas o que realmente será usado:
+# o código da ocorrência, a data e o horário. fiz isso para deixar as próximas etapas
+# mais simples e evitar carregar informação que não entra nessa análise específica.
 df_ocorrencia_sel = df_ocorrencia[
     [
         "codigo_ocorrencia",
@@ -38,11 +63,16 @@ df_ocorrencia_sel = df_ocorrencia[
     ]
 ].copy()
 
+# algumas versões da base podem trazer a coluna ocorrencia_tipo_categoria,
+# enquanto outras usam ocorrencia_tipo. deixei essa verificação para o código
+# funcionar nas duas situações.
 if "ocorrencia_tipo_categoria" in df_tipo.columns:
     col_tipo = "ocorrencia_tipo_categoria"
 else:
     col_tipo = "ocorrencia_tipo"
 
+# na tabela de tipos, mantenho o código da ocorrência, o nome do tipo e a taxonomia ICAO.
+# usei também a taxonomia porque a colisão com ave pode ser identificada pelo código BIRD.
 df_tipo_sel = df_tipo[
     [
         "codigo_ocorrencia1",
@@ -53,8 +83,10 @@ df_tipo_sel = df_tipo[
 
 
 # =========================
-# PADRONIZAÇÃO DOS NOMES DAS CHAVES
+# PADRONIZAÇÃO DA CHAVE DE JUNÇÃO
 # =========================
+# a tabela de tipos usa o nome codigo_ocorrencia1, enquanto a tabela principal usa
+# codigo_ocorrencia. renomeio a coluna para conseguir integrar as tabelas com merge.
 df_tipo_sel = df_tipo_sel.rename(
     columns={
         "codigo_ocorrencia1": "codigo_ocorrencia"
@@ -63,8 +95,11 @@ df_tipo_sel = df_tipo_sel.rename(
 
 
 # =========================
-# LIMPEZA DOS TEXTOS
+# LIMPEZA E PADRONIZAÇÃO DOS TEXTOS
 # =========================
+# nesta parte eu padronizo os textos para letras maiúsculas e removo espaços extras.
+# pensei em fazer assim porque o filtro de colisão com ave depende de comparação textual,
+# então "COLISÃO COM AVE" e " colisão com ave " precisam ser tratados como a mesma coisa.
 df_tipo_sel[col_tipo] = (
     df_tipo_sel[col_tipo]
     .fillna("")
@@ -83,8 +118,11 @@ df_tipo_sel["taxonomia_tipo_icao"] = (
 
 
 # =========================
-# REMOÇÃO DE DUPLICATAS
+# REMOÇÃO DE DUPLICATAS NA TABELA DE TIPOS
 # =========================
+# uma ocorrência pode aparecer mais de uma vez na tabela de tipos, o que pode ser válido.
+# por isso, removo apenas repetições exatas da combinação ocorrência + tipo + taxonomia.
+# a intenção é evitar contar duplicatas artificiais sem apagar relações reais.
 df_tipo_sel = df_tipo_sel.drop_duplicates(
     subset=[
         "codigo_ocorrencia",
@@ -95,8 +133,11 @@ df_tipo_sel = df_tipo_sel.drop_duplicates(
 
 
 # =========================
-# MERGE OCORRÊNCIA + TIPO
+# INTEGRAÇÃO ENTRE OCORRÊNCIAS E TIPOS
 # =========================
+# aqui eu junto a tabela com data e hora com a tabela que informa o tipo da ocorrência.
+# uso inner join porque, nesta análise, só interessam registros que possuem informação
+# de tipo associada.
 df = pd.merge(
     df_ocorrencia_sel,
     df_tipo_sel,
@@ -106,39 +147,44 @@ df = pd.merge(
 
 
 # =========================
-# FILTRO BIRD STRIKE
+# FILTRO DAS OCORRÊNCIAS DE COLISÃO COM AVE
 # =========================
+# aqui eu filtro apenas as ocorrências relacionadas a colisão com ave.
+# pensei em usar tanto o nome do tipo quanto a taxonomia ICAO porque, dependendo
+# da forma como o registro aparece na base, a ocorrência pode ser identificada
+# como "COLISÃO COM AVE" ou pela taxonomia "BIRD".
 df_bird = df[
     (df[col_tipo] == "COLISÃO COM AVE") |
     (df["taxonomia_tipo_icao"] == "BIRD")
 ].copy()
 
-# evita contar a mesma ocorrência mais de uma vez
+# depois do filtro, removo duplicatas por código de ocorrência.
+# isso é importante porque uma mesma ocorrência pode ter mais de uma linha na tabela
+# de tipos, mas para esta análise cada ocorrência deve ser contada apenas uma vez.
 df_bird = df_bird.drop_duplicates(
     subset=[
         "codigo_ocorrencia"
     ]
 )
 
-print("\n==============================")
-print("BIRD STRIKE")
-print("==============================")
-print("Total de ocorrências únicas de bird strike:", df_bird["codigo_ocorrencia"].nunique())
-
 
 # =========================
-# TRATAMENTO DE DATA
+# TRATAMENTO DAS DATAS
 # =========================
+# guardo uma cópia da data original antes da conversão.
+# fiz isso porque, se alguma conversão falhar, ainda consigo rastrear o valor original.
 df_bird["ocorrencia_dia_original"] = df_bird["ocorrencia_dia"].copy()
 
-# primeira tentativa: formato brasileiro
+# primeiro tento converter usando o formato brasileiro, que é o formato esperado
+# na base utilizada no trabalho.
 df_bird["ocorrencia_dia"] = pd.to_datetime(
     df_bird["ocorrencia_dia_original"],
     format="%d/%m/%Y",
     errors="coerce"
 )
 
-# segunda tentativa: caso alguma data venha em outro formato
+# se alguma data não for convertida na primeira tentativa, faço uma segunda conversão
+# mais flexível, mantendo dayfirst=True para respeitar a ordem dia/mês/ano.
 mask_data_invalida = df_bird["ocorrencia_dia"].isna()
 
 df_bird.loc[mask_data_invalida, "ocorrencia_dia"] = pd.to_datetime(
@@ -147,13 +193,17 @@ df_bird.loc[mask_data_invalida, "ocorrencia_dia"] = pd.to_datetime(
     dayfirst=True
 )
 
+# extraio ano e mês porque eles serão usados nas análises temporais.
 df_bird["ano"] = df_bird["ocorrencia_dia"].dt.year
 df_bird["mes"] = df_bird["ocorrencia_dia"].dt.month
 
 
 # =========================
-# TRATAMENTO DE HORA
+# TRATAMENTO DOS HORÁRIOS
 # =========================
+# aqui converto o horário para datetime e depois extraio apenas a hora.
+# para esta análise, o minuto e o segundo não são necessários, porque o objetivo
+# é observar a distribuição das ocorrências ao longo das 24 horas do dia.
 df_bird["hora"] = pd.to_datetime(
     df_bird["ocorrencia_hora"],
     format="%H:%M:%S",
@@ -162,8 +212,10 @@ df_bird["hora"] = pd.to_datetime(
 
 
 # =========================
-# CONFIGURAÇÃO DE MESES
+# CONFIGURAÇÃO DOS MESES
 # =========================
+# criei esse dicionário para transformar o número do mês em nome abreviado.
+# isso deixa os gráficos mais legíveis do que usar apenas os números de 1 a 12.
 nomes_meses = {
     1: "Jan",
     2: "Fev",
@@ -190,8 +242,10 @@ df_bird["mes_nome"] = df_bird["mes"].map(nomes_meses)
 
 
 # =========================
-# ANÁLISE POR MÊS - BASE INTEIRA
+# ANÁLISE POR MÊS - BASE COMPLETA
 # =========================
+# nesta etapa conto quantas ocorrências únicas de colisão com ave existem em cada mês.
+# uso nunique porque a unidade de análise é a ocorrência, e não a linha do dataframe.
 bird_por_mes = (
     df_bird
     .dropna(subset=["mes"])
@@ -200,18 +254,32 @@ bird_por_mes = (
     .reindex(ordem_meses_num, fill_value=0)
 )
 
-print("\nOcorrências de bird strike por mês:")
-for mes_num, qtd in bird_por_mes.items():
-    print(f"{nomes_meses[mes_num]}: {qtd}")
+# transformo a série em dataframe para salvar o resultado em CSV.
+# isso substitui os prints de conferência e permite consultar os valores depois.
+bird_por_mes_df = bird_por_mes.reset_index()
+bird_por_mes_df.columns = ["mes", "qtd_ocorrencias"]
+bird_por_mes_df["mes_nome"] = bird_por_mes_df["mes"].map(nomes_meses)
 
-print("\nConferência: soma por mês na base inteira")
-print("Soma mensal:", bird_por_mes.sum())
-print(
-    "Ocorrências únicas com data válida:",
-    df_bird.dropna(subset=["mes"])["codigo_ocorrencia"].nunique()
+bird_por_mes_df = bird_por_mes_df[
+    [
+        "mes",
+        "mes_nome",
+        "qtd_ocorrencias"
+    ]
+]
+
+bird_por_mes_df.to_csv(
+    pasta_csvs + "bird_strike_por_mes.csv",
+    index=False,
+    encoding="utf-8-sig"
 )
 
 
+# =========================
+# GRÁFICO DE COLISÕES COM AVE POR MÊS
+# =========================
+# este gráfico mostra a distribuição mensal das colisões com ave considerando
+# toda a base filtrada. pensei em usar linha porque os meses possuem uma ordem natural.
 plt.figure(figsize=(12, 6))
 
 ax = sns.lineplot(
@@ -229,13 +297,16 @@ ax.set_ylabel("Quantidade de ocorrências", fontsize=13)
 ax.grid(True, linestyle="--", alpha=0.4)
 
 plt.tight_layout()
-plt.savefig("Imagens/ocorrencias_bird_por_mes.png", dpi=300)
-plt.show()
+plt.savefig(pasta_imagens + "ocorrencias_bird_por_mes.png", dpi=300)
+plt.close()
 
 
 # =========================
 # ANÁLISE POR MÊS - ANOS 2023, 2024 E 2025
 # =========================
+# aqui faço um recorte específico dos anos mais recentes usados na comparação.
+# pensei em separar esses anos porque eles permitem observar melhor a variação mensal
+# recente, sem misturar todo o histórico da base em uma única curva.
 anos_analisados = [
     2023,
     2024,
@@ -254,6 +325,8 @@ bird_por_mes_ano = (
     .reset_index(name="qtd_ocorrencias")
 )
 
+# reorganizo a tabela para que cada linha seja um ano e cada coluna seja um mês.
+# esse formato facilita tanto a geração do gráfico quanto a exportação dos resultados.
 bird_por_mes_ano = (
     bird_por_mes_ano
     .pivot(
@@ -269,20 +342,24 @@ bird_por_mes_ano = (
     .astype(int)
 )
 
-print("\nOcorrências únicas de bird strike por mês - 2023 a 2025:")
-print(bird_por_mes_ano)
+# salvo a tabela com os nomes dos meses nas colunas para facilitar a leitura.
+bird_por_mes_ano_csv = bird_por_mes_ano.copy()
+bird_por_mes_ano_csv.columns = ordem_meses_nome
 
-print("\nConferência: total por ano")
-print(bird_por_mes_ano.sum(axis=1))
-
-print("\nConferência: total 2023 a 2025")
-print("Soma da tabela:", bird_por_mes_ano.values.sum())
-print(
-    "Ocorrências únicas filtradas:",
-    df_bird_anos.dropna(subset=["mes"])["codigo_ocorrencia"].nunique()
+bird_por_mes_ano_csv.to_csv(
+    pasta_csvs + "bird_strike_por_mes_2023_2025.csv",
+    index=True,
+    index_label="ano",
+    encoding="utf-8-sig"
 )
 
 
+# =========================
+# GRÁFICO DE COLISÕES COM AVE POR MÊS ENTRE 2023 E 2025
+# =========================
+# neste gráfico, comparo os três anos no mesmo eixo mensal.
+# essa visualização ajuda a perceber se algum ano teve comportamento muito diferente
+# dos demais em determinados meses.
 plt.figure(figsize=(12, 6))
 
 for ano in anos_analisados:
@@ -302,13 +379,16 @@ plt.grid(True, linestyle="--", alpha=0.4)
 plt.legend(title="Ano")
 
 plt.tight_layout()
-plt.savefig("Imagens/ocorrencias_bird_por_mes_2023_2025.png", dpi=300)
-plt.show()
+plt.savefig(pasta_imagens + "ocorrencias_bird_por_mes_2023_2025.png", dpi=300)
+plt.close()
 
 
 # =========================
-# ANÁLISE POR HORA
+# ANÁLISE POR HORA DO DIA
 # =========================
+# nesta etapa conto as ocorrências de colisão com ave por hora.
+# pensei em fazer essa análise porque o horário do dia pode revelar concentrações
+# em períodos específicos, como manhã, tarde ou noite.
 horas = list(range(24))
 
 bird_por_hora = (
@@ -319,18 +399,30 @@ bird_por_hora = (
     .reindex(horas, fill_value=0)
 )
 
-print("\nOcorrências de bird strike por hora:")
-for hora, qtd in bird_por_hora.items():
-    print(f"{int(hora):02d}h: {qtd}")
+bird_por_hora_df = bird_por_hora.reset_index()
+bird_por_hora_df.columns = ["hora", "qtd_ocorrencias"]
+bird_por_hora_df["hora_formatada"] = bird_por_hora_df["hora"].astype(int).astype(str).str.zfill(2) + "h"
 
-print("\nConferência: soma por hora")
-print("Soma por hora:", bird_por_hora.sum())
-print(
-    "Ocorrências únicas com hora válida:",
-    df_bird.dropna(subset=["hora"])["codigo_ocorrencia"].nunique()
+bird_por_hora_df = bird_por_hora_df[
+    [
+        "hora",
+        "hora_formatada",
+        "qtd_ocorrencias"
+    ]
+]
+
+bird_por_hora_df.to_csv(
+    pasta_csvs + "bird_strike_por_hora.csv",
+    index=False,
+    encoding="utf-8-sig"
 )
 
 
+# =========================
+# GRÁFICO DE COLISÕES COM AVE POR HORA
+# =========================
+# uso um gráfico de linha porque as horas também formam uma sequência ordenada.
+# esse gráfico ajuda a visualizar em quais períodos do dia os registros se concentram.
 plt.figure(figsize=(12, 6))
 
 ax = sns.lineplot(
@@ -349,13 +441,16 @@ ax.set_xticks(horas)
 ax.grid(True, linestyle="--", alpha=0.4)
 
 plt.tight_layout()
-plt.savefig("Imagens/ocorrencias_bird_por_hora.png", dpi=300)
-plt.show()
+plt.savefig(pasta_imagens + "ocorrencias_bird_por_hora.png", dpi=300)
+plt.close()
 
 
 # =========================
-# HEATMAP MÊS x HORA
+# PREPARAÇÃO DOS DADOS PARA O HEATMAP MÊS x HORA
 # =========================
+# para o heatmap, eu preciso manter apenas registros que tenham mês e hora válidos.
+# pensei nessa visualização porque ela combina as duas dimensões temporais ao mesmo tempo,
+# mostrando em quais meses e horários as ocorrências aparecem com maior frequência.
 df_heat = df_bird.dropna(
     subset=[
         "mes",
@@ -383,25 +478,19 @@ heatmap_data = (
 
 heatmap_data.index = ordem_meses_nome
 
-
-# =========================
-# CONFERÊNCIA DO HEATMAP
-# =========================
-print("\nConferência: soma do heatmap por mês")
-print(heatmap_data.sum(axis=1))
-
-print("\nConferência: totais do gráfico mensal")
-for mes_nome, qtd in zip(ordem_meses_nome, bird_por_mes.values):
-    print(f"{mes_nome}: {qtd}")
-
-print("\nConferência: soma total do heatmap")
-print("Soma heatmap:", heatmap_data.values.sum())
-print(
-    "Ocorrências únicas com data e hora válidas:",
-    df_heat["codigo_ocorrencia"].nunique()
+heatmap_data.to_csv(
+    pasta_csvs + "bird_strike_heatmap_mes_hora.csv",
+    index=True,
+    index_label="mes",
+    encoding="utf-8-sig"
 )
 
 
+# =========================
+# GRÁFICO HEATMAP MÊS x HORA
+# =========================
+# neste gráfico, cada célula representa a quantidade de ocorrências em uma combinação
+# específica de mês e hora. quanto mais intensa a cor, maior a quantidade de registros.
 plt.figure(figsize=(16, 7))
 
 ax = sns.heatmap(
@@ -427,10 +516,16 @@ plt.xticks(rotation=0)
 plt.yticks(rotation=0)
 
 plt.tight_layout()
-plt.savefig("Imagens/heatmap_bird_mes_hora.png", dpi=300)
-plt.show()
+plt.savefig(pasta_imagens + "heatmap_bird_mes_hora.png", dpi=300)
+plt.close()
 
-print("\nOcorrências de bird strike por ano:")
+
+# =========================
+# ANÁLISE POR ANO
+# =========================
+# por fim, calculo a quantidade de ocorrências de colisão com ave por ano.
+# essa tabela não entra necessariamente como gráfico principal, mas ajuda a entender
+# a distribuição temporal geral da base e pode ser usada como apoio na apresentação.
 bird_por_ano = (
     df_bird
     .dropna(subset=["ano"])
@@ -439,4 +534,56 @@ bird_por_ano = (
     .sort_index()
 )
 
-print(bird_por_ano)
+bird_por_ano_df = bird_por_ano.reset_index()
+bird_por_ano_df.columns = ["ano", "qtd_ocorrencias"]
+
+bird_por_ano_df.to_csv(
+    pasta_csvs + "bird_strike_por_ano.csv",
+    index=False,
+    encoding="utf-8-sig"
+)
+
+
+# =========================
+# RESUMO DE CONFERÊNCIA DA ANÁLISE
+# =========================
+# como eu removi os prints do terminal, deixei as principais conferências em um CSV.
+# esse arquivo serve para verificar rapidamente quantas ocorrências entraram em cada etapa.
+resumo_bird = pd.DataFrame(
+    [
+        {
+            "metrica": "ocorrencias_bird_unicas",
+            "valor": df_bird["codigo_ocorrencia"].nunique()
+        },
+        {
+            "metrica": "ocorrencias_com_data_valida",
+            "valor": df_bird.dropna(subset=["mes"])["codigo_ocorrencia"].nunique()
+        },
+        {
+            "metrica": "ocorrencias_com_hora_valida",
+            "valor": df_bird.dropna(subset=["hora"])["codigo_ocorrencia"].nunique()
+        },
+        {
+            "metrica": "ocorrencias_com_data_e_hora_validas",
+            "valor": df_heat["codigo_ocorrencia"].nunique()
+        },
+        {
+            "metrica": "soma_tabela_mensal",
+            "valor": int(bird_por_mes.sum())
+        },
+        {
+            "metrica": "soma_tabela_horaria",
+            "valor": int(bird_por_hora.sum())
+        },
+        {
+            "metrica": "soma_heatmap_mes_hora",
+            "valor": int(heatmap_data.values.sum())
+        }
+    ]
+)
+
+resumo_bird.to_csv(
+    pasta_csvs + "resumo_bird_strike.csv",
+    index=False,
+    encoding="utf-8-sig"
+)

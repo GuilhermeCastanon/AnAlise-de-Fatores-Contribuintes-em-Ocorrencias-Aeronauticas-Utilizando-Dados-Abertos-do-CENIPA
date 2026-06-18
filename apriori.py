@@ -1,6 +1,11 @@
 # =========================
 # BIBLIOTECAS
 # =========================
+# uso o pandas para preparar as tabelas e montar as transações.
+# o TransactionEncoder transforma as transações em uma matriz booleana,
+# que é o formato esperado pelo algoritmo Apriori da biblioteca mlxtend.
+import os
+
 import pandas as pd
 
 from mlxtend.preprocessing import TransactionEncoder
@@ -8,25 +13,46 @@ from mlxtend.frequent_patterns import apriori, association_rules
 
 
 # =========================
-# CONFIGURAÇÕES
+# CONFIGURAÇÕES GERAIS
 # =========================
+# aqui eu deixo centralizados os caminhos e os parâmetros principais da mineração.
+# pensei em separar isso no começo do código porque facilita ajustar os suportes,
+# a confiança mínima e o lift mínimo sem precisar procurar esses valores no meio do script.
 path = "Recursos/"
+pasta_csvs = "CSVs/"
 
+os.makedirs(pasta_csvs, exist_ok=True)
+
+# suportes testados para regras gerais, isto é, regras sem considerar fatores contribuintes.
+# esses valores são testados em ordem até que alguma regra útil seja encontrada.
 SUPORTES_GERAIS = [0.05, 0.03, 0.02, 0.01]
+
+# suportes testados para regras que envolvem fatores contribuintes.
+# usei uma lista com valores menores porque a quantidade de ocorrências com fator registrado
+# é bem menor do que a quantidade total de ocorrências da base.
 SUPORTES_FATORES = [0.03, 0.02, 0.01, 0.005, 0.002]
 
+# parâmetros das regras gerais.
 MIN_CONF_GERAL = 0.50
 MIN_LIFT_GERAL = 1.10
 
+# parâmetros das regras envolvendo fatores contribuintes.
+# deixei a confiança mínima menor porque os fatores aparecem em um subconjunto limitado
+# da base, então filtros muito rígidos poderiam eliminar associações relevantes.
 MIN_CONF_FATOR = 0.20
 MIN_LIFT_FATOR = 1.00
 
+# limite máximo de itens em cada itemset.
+# isso evita combinações muito grandes, difíceis de interpretar na apresentação.
 MAX_LEN_ITEMSET = 4
 
 
 # =========================
-# FUNÇÕES AUXILIARES
+# FUNÇÃO PARA IDENTIFICAR VALORES VÁLIDOS
 # =========================
+# esta função concentra a regra de limpeza de valores inválidos.
+# pensei em fazer assim porque várias tabelas possuem campos vazios, desconhecidos
+# ou não informados, e todos eles devem ser tratados da mesma forma.
 def valor_valido(valor):
     if pd.isna(valor):
         return False
@@ -48,6 +74,13 @@ def valor_valido(valor):
     return valor.upper() not in valores_ignorar
 
 
+# =========================
+# FUNÇÃO PARA CRIAR ITENS DAS TRANSAÇÕES
+# =========================
+# cada característica da ocorrência é transformada em um item no formato Prefixo:Valor.
+# por exemplo: Tipo:FALHA DO MOTOR EM VOO ou Fator:MANUTENÇÃO DA AERONAVE.
+# fiz isso porque o Apriori trabalha com itens, então preciso transformar as colunas
+# da base em uma lista de características associadas a cada ocorrência.
 def criar_item(prefixo, valor):
     if not valor_valido(valor):
         return None
@@ -56,10 +89,21 @@ def criar_item(prefixo, valor):
     return f"{prefixo}:{valor}"
 
 
+# =========================
+# FUNÇÃO PARA VERIFICAR PREFIXOS
+# =========================
+# esta função verifica se um itemset possui algum item com determinado prefixo.
+# uso isso principalmente para identificar regras cujo consequente é um fator contribuinte.
 def tem_prefixo(conjunto, prefixo):
     return any(str(item).startswith(prefixo) for item in conjunto)
 
 
+# =========================
+# FUNÇÃO PARA EXTRAIR OS PREFIXOS DE UM ITEMSET
+# =========================
+# aqui eu separo apenas a parte antes dos dois-pontos.
+# por exemplo, em Tipo:FALHA DO MOTOR EM VOO, o prefixo é Tipo.
+# isso ajuda a identificar regras redundantes entre itens da mesma variável.
 def prefixos_itemset(itemset):
     return {
         str(item).split(":", 1)[0]
@@ -67,6 +111,13 @@ def prefixos_itemset(itemset):
     }
 
 
+# =========================
+# FUNÇÃO PARA REMOVER REGRAS DA MESMA VARIÁVEL
+# =========================
+# esta função verifica se o antecedente e o consequente pertencem à mesma variável.
+# pensei em remover esse tipo de regra porque ela pode gerar associações pouco úteis,
+# como Tipo:X => Tipo:Y, que normalmente não acrescentam interpretação relevante
+# para o objetivo do trabalho.
 def regra_com_mesma_variavel(linha):
     prefixos_antecedente = prefixos_itemset(linha["antecedents"])
     prefixos_consequente = prefixos_itemset(linha["consequents"])
@@ -74,10 +125,21 @@ def regra_com_mesma_variavel(linha):
     return len(prefixos_antecedente & prefixos_consequente) > 0
 
 
+# =========================
+# FUNÇÃO PARA FORMATAR ITEMSETS
+# =========================
+# os itemsets gerados pelo mlxtend aparecem como frozenset.
+# esta função transforma esses conjuntos em texto legível para salvar nos arquivos CSV.
 def formatar_itemset(itemset):
     return " + ".join(sorted(list(itemset)))
 
 
+# =========================
+# FUNÇÃO PARA CRIAR FAIXA HORÁRIA
+# =========================
+# aqui eu agrupo as horas do dia em quatro períodos.
+# pensei em usar faixas horárias em vez da hora exata porque isso gera itens mais gerais
+# e mais interpretáveis nas regras de associação.
 def faixa_horaria(hora):
     if pd.isna(hora):
         return None
@@ -96,7 +158,42 @@ def faixa_horaria(hora):
     return None
 
 
+# =========================
+# FUNÇÃO PARA GERAR REGRAS DE ASSOCIAÇÃO
+# =========================
+# esta é a função central da mineração de padrões.
+# ela recebe uma lista de transações, testa diferentes valores de suporte mínimo
+# e retorna as primeiras regras que passam pelos filtros definidos.
+#
+# pensei em testar suportes em sequência porque nem sempre um suporte alto encontra regras.
+# então o código começa com critérios mais rígidos e vai flexibilizando até encontrar
+# regras interpretáveis.
 def gerar_regras(transacoes, lista_suportes, min_conf, min_lift, nome_analise):
+    historico = []
+
+    if len(transacoes) == 0:
+        historico.append(
+            {
+                "analise": nome_analise,
+                "min_support": None,
+                "total_transacoes": 0,
+                "total_itens_diferentes": 0,
+                "itemsets_frequentes": 0,
+                "regras_apos_filtros": 0,
+                "status": "sem_transacoes"
+            }
+        )
+
+        return (
+            pd.DataFrame(),
+            pd.DataFrame(),
+            None,
+            pd.DataFrame(),
+            pd.DataFrame(historico)
+        )
+
+    # o TransactionEncoder transforma a lista de transações em uma matriz de True/False.
+    # cada coluna representa um item possível, e cada linha representa uma ocorrência.
     te = TransactionEncoder()
     te_array = te.fit(transacoes).transform(transacoes)
 
@@ -105,15 +202,7 @@ def gerar_regras(transacoes, lista_suportes, min_conf, min_lift, nome_analise):
         columns=te.columns_
     )
 
-    print("\n==============================")
-    print(nome_analise)
-    print("==============================")
-    print("Total de transações:", len(transacoes))
-    print("Total de itens diferentes:", len(df_transacoes.columns))
-
     for min_support in lista_suportes:
-        print("\nTestando min_support =", min_support)
-
         itens_frequentes = apriori(
             df_transacoes,
             min_support=min_support,
@@ -122,7 +211,18 @@ def gerar_regras(transacoes, lista_suportes, min_conf, min_lift, nome_analise):
         )
 
         if itens_frequentes.empty:
-            print("Nenhum itemset frequente encontrado.")
+            historico.append(
+                {
+                    "analise": nome_analise,
+                    "min_support": min_support,
+                    "total_transacoes": len(transacoes),
+                    "total_itens_diferentes": len(df_transacoes.columns),
+                    "itemsets_frequentes": 0,
+                    "regras_apos_filtros": 0,
+                    "status": "sem_itemsets_frequentes"
+                }
+            )
+
             continue
 
         regras = association_rules(
@@ -132,54 +232,107 @@ def gerar_regras(transacoes, lista_suportes, min_conf, min_lift, nome_analise):
         )
 
         if regras.empty:
-            print("Nenhuma regra gerada.")
+            historico.append(
+                {
+                    "analise": nome_analise,
+                    "min_support": min_support,
+                    "total_transacoes": len(transacoes),
+                    "total_itens_diferentes": len(df_transacoes.columns),
+                    "itemsets_frequentes": len(itens_frequentes),
+                    "regras_apos_filtros": 0,
+                    "status": "sem_regras"
+                }
+            )
+
             continue
 
+        # aplico os filtros mínimos de confiança e lift.
+        # a confiança mede a frequência com que o consequente aparece quando o antecedente aparece.
+        # o lift ajuda a verificar se a associação é mais forte do que seria esperado ao acaso.
         regras = regras[
             (regras["confidence"] >= min_conf) &
             (regras["lift"] >= min_lift)
         ].copy()
 
         if regras.empty:
-            print("Nenhuma regra passou nos filtros de confiança e lift.")
+            historico.append(
+                {
+                    "analise": nome_analise,
+                    "min_support": min_support,
+                    "total_transacoes": len(transacoes),
+                    "total_itens_diferentes": len(df_transacoes.columns),
+                    "itemsets_frequentes": len(itens_frequentes),
+                    "regras_apos_filtros": 0,
+                    "status": "sem_regras_apos_confidence_lift"
+                }
+            )
+
             continue
 
-        # mantém apenas regras com um único consequente
+        # mantenho apenas regras com um único consequente.
+        # pensei em fazer assim porque regras com vários consequentes são mais difíceis
+        # de explicar e menos adequadas para a discussão do TCC.
         regras = regras[
             regras["consequents"].apply(lambda x: len(x) == 1)
         ].copy()
 
-        # remove regras em que antecedente e consequente pertencem à mesma variável
-        # exemplo: Tipo:X => Tipo:Y
+        # removo regras em que antecedente e consequente pertencem à mesma variável.
+        # isso evita relações redundantes e pouco interpretáveis.
         regras = regras[
             ~regras.apply(regra_com_mesma_variavel, axis=1)
         ].copy()
 
         if regras.empty:
-            print("Nenhuma regra permaneceu após remover redundâncias.")
+            historico.append(
+                {
+                    "analise": nome_analise,
+                    "min_support": min_support,
+                    "total_transacoes": len(transacoes),
+                    "total_itens_diferentes": len(df_transacoes.columns),
+                    "itemsets_frequentes": len(itens_frequentes),
+                    "regras_apos_filtros": 0,
+                    "status": "sem_regras_apos_remover_redundancias"
+                }
+            )
+
             continue
 
+        # ordeno as regras priorizando lift, confiança e suporte.
+        # isso faz com que as primeiras regras sejam as mais interessantes
+        # segundo os critérios adotados no trabalho.
         regras = regras.sort_values(
             by=["lift", "confidence", "support"],
             ascending=False
         )
 
-        print("Itemsets frequentes encontrados:", len(itens_frequentes))
-        print("Regras encontradas:", len(regras))
-        print("Suporte utilizado:", min_support)
+        historico.append(
+            {
+                "analise": nome_analise,
+                "min_support": min_support,
+                "total_transacoes": len(transacoes),
+                "total_itens_diferentes": len(df_transacoes.columns),
+                "itemsets_frequentes": len(itens_frequentes),
+                "regras_apos_filtros": len(regras),
+                "status": "regras_encontradas"
+            }
+        )
 
-        return itens_frequentes, regras, min_support, df_transacoes
-
-    print("\nNenhuma regra encontrada para:", nome_analise)
+        return itens_frequentes, regras, min_support, df_transacoes, pd.DataFrame(historico)
 
     return (
         pd.DataFrame(),
         pd.DataFrame(),
         None,
-        df_transacoes
+        df_transacoes,
+        pd.DataFrame(historico)
     )
 
 
+# =========================
+# FUNÇÃO PARA PREPARAR A EXPORTAÇÃO DAS REGRAS
+# =========================
+# esta função deixa as regras em formato mais legível antes de salvar em CSV.
+# sem isso, os antecedentes e consequentes ficariam como objetos do tipo frozenset.
 def preparar_exportacao(regras):
     colunas = [
         "antecedents",
@@ -204,6 +357,12 @@ def preparar_exportacao(regras):
     return regras_export
 
 
+# =========================
+# FUNÇÃO PARA PREPARAR A EXPORTAÇÃO DOS ITEMSETS
+# =========================
+# além das regras, salvo também os itemsets frequentes.
+# isso ajuda a verificar quais combinações de itens foram consideradas frequentes
+# antes da geração das regras de associação.
 def preparar_itemsets_exportacao(itemsets):
     if itemsets.empty:
         return pd.DataFrame(columns=["support", "itemsets"])
@@ -218,6 +377,9 @@ def preparar_itemsets_exportacao(itemsets):
 # =========================
 # LEITURA DOS DADOS
 # =========================
+# nesta etapa carrego as quatro tabelas usadas para montar as transações.
+# cada ocorrência será tratada como uma transação, e as características associadas
+# a ela serão transformadas em itens.
 df_ocorrencia = pd.read_csv(path + "ocorrencia.csv", sep=";", encoding="latin1")
 df_tipo = pd.read_csv(path + "ocorrencia_tipo.csv", sep=";", encoding="latin1")
 df_aeronave = pd.read_csv(path + "aeronave.csv", sep=";", encoding="latin1")
@@ -225,8 +387,9 @@ df_fator = pd.read_csv(path + "fator_contribuinte.csv", sep=";", encoding="latin
 
 
 # =========================
-# LIMPEZA DOS NOMES DAS COLUNAS
+# PADRONIZAÇÃO DOS NOMES DAS COLUNAS
 # =========================
+# removo espaços extras dos nomes das colunas para evitar erro de seleção depois.
 df_ocorrencia.columns = df_ocorrencia.columns.str.strip()
 df_tipo.columns = df_tipo.columns.str.strip()
 df_aeronave.columns = df_aeronave.columns.str.strip()
@@ -234,12 +397,14 @@ df_fator.columns = df_fator.columns.str.strip()
 
 
 # =========================
-# PREPARAÇÃO DA TABELA OCORRÊNCIA
+# PREPARAÇÃO DA TABELA DE OCORRÊNCIAS
 # =========================
+# aqui seleciono as informações gerais da ocorrência.
+# deixei a classificação fora das transações finais porque ela gerava associações
+# muito óbvias com outras variáveis e pouco úteis para a interpretação dos fatores.
 df_ocorrencia_sel = df_ocorrencia[
     [
         "codigo_ocorrencia",
-        #"ocorrencia_classificacao",
         "ocorrencia_uf",
         "ocorrencia_dia",
         "ocorrencia_hora"
@@ -250,6 +415,8 @@ df_ocorrencia_sel = df_ocorrencia_sel.drop_duplicates(
     subset=["codigo_ocorrencia"]
 )
 
+# converto a data para extrair o mês da ocorrência.
+# o mês entra como item porque pode existir algum padrão temporal associado às ocorrências.
 df_ocorrencia_sel["ocorrencia_dia"] = pd.to_datetime(
     df_ocorrencia_sel["ocorrencia_dia"],
     errors="coerce",
@@ -275,6 +442,7 @@ nomes_meses = {
 
 df_ocorrencia_sel["mes"] = df_ocorrencia_sel["mes_num"].map(nomes_meses)
 
+# converto o horário para extrair apenas a hora e depois agrupar em faixa horária.
 df_ocorrencia_sel["hora"] = pd.to_datetime(
     df_ocorrencia_sel["ocorrencia_hora"],
     format="%H:%M:%S",
@@ -285,8 +453,11 @@ df_ocorrencia_sel["faixa_horaria"] = df_ocorrencia_sel["hora"].apply(faixa_horar
 
 
 # =========================
-# PREPARAÇÃO DA TABELA TIPO
+# PREPARAÇÃO DA TABELA DE TIPOS DE OCORRÊNCIA
 # =========================
+# nesta tabela eu busco o tipo de ocorrência associado a cada código.
+# novamente deixo a verificação de coluna porque a base pode mudar um pouco
+# dependendo da versão baixada.
 if "ocorrencia_tipo_categoria" in df_tipo.columns:
     coluna_tipo = "ocorrencia_tipo_categoria"
 else:
@@ -306,6 +477,8 @@ df_tipo_sel = df_tipo_sel.rename(
     }
 )
 
+# removo apenas duplicatas da mesma combinação ocorrência + tipo.
+# uma ocorrência pode ter mais de um tipo, e isso deve ser preservado.
 df_tipo_sel = df_tipo_sel.drop_duplicates(
     subset=[
         "codigo_ocorrencia",
@@ -315,8 +488,10 @@ df_tipo_sel = df_tipo_sel.drop_duplicates(
 
 
 # =========================
-# PREPARAÇÃO DA TABELA AERONAVE
+# PREPARAÇÃO DA TABELA DE AERONAVES
 # =========================
+# a coluna que representa o tipo de equipamento pode aparecer com nomes diferentes.
+# por isso faço essa verificação antes de selecionar as colunas.
 if "aeronave_tipo_equipamento" in df_aeronave.columns:
     coluna_tipo_veiculo = "aeronave_tipo_equipamento"
 elif "aeronave_tipo_veiculo" in df_aeronave.columns:
@@ -328,6 +503,9 @@ else:
         f"{list(df_aeronave.columns)}"
     )
 
+# nesta análise, mantive principalmente fase de operação e nível de dano.
+# pensei em usar essas variáveis porque elas ajudam a contextualizar a ocorrência
+# sem deixar as transações excessivamente específicas.
 df_aeronave_sel = df_aeronave[
     [
         "codigo_ocorrencia2",
@@ -349,8 +527,10 @@ df_aeronave_sel = df_aeronave_sel.drop_duplicates()
 
 
 # =========================
-# PREPARAÇÃO DA TABELA FATOR CONTRIBUINTE
+# PREPARAÇÃO DA TABELA DE FATORES CONTRIBUINTES
 # =========================
+# aqui eu preparo os fatores contribuintes, que são os principais consequentes
+# de interesse nas regras finais.
 df_fator_sel = df_fator[
     [
         "codigo_ocorrencia3",
@@ -364,6 +544,8 @@ df_fator_sel = df_fator_sel.rename(
     }
 )
 
+# removo duplicatas da mesma combinação ocorrência + fator.
+# isso evita contar duas vezes o mesmo fator dentro da mesma ocorrência.
 df_fator_sel = df_fator_sel.drop_duplicates(
     subset=[
         "codigo_ocorrencia",
@@ -373,8 +555,11 @@ df_fator_sel = df_fator_sel.drop_duplicates(
 
 
 # =========================
-# CRIAÇÃO DAS TRANSAÇÕES
+# CRIAÇÃO DA ESTRUTURA DAS TRANSAÇÕES
 # =========================
+# cada ocorrência será uma transação.
+# começo criando um dicionário em que a chave é o código da ocorrência
+# e o valor é um conjunto de itens associados a ela.
 codigos_ocorrencia = set(df_ocorrencia_sel["codigo_ocorrencia"].unique())
 
 transacoes_dict = {
@@ -384,13 +569,14 @@ transacoes_dict = {
 
 
 # =========================
-# ITENS DA TABELA OCORRÊNCIA
+# ADIÇÃO DOS ITENS DA TABELA DE OCORRÊNCIAS
 # =========================
+# aqui adiciono itens gerais da ocorrência, como UF, mês e faixa horária.
+# esses itens entram como possíveis antecedentes nas regras.
 for _, linha in df_ocorrencia_sel.iterrows():
     codigo = linha["codigo_ocorrencia"]
 
     itens = {
-        #"Classificacao": linha["ocorrencia_classificacao"],
         "UF": linha["ocorrencia_uf"],
         "Mes": linha["mes"],
         "Faixa_horaria": linha["faixa_horaria"]
@@ -404,8 +590,11 @@ for _, linha in df_ocorrencia_sel.iterrows():
 
 
 # =========================
-# ITENS DA TABELA TIPO
+# ADIÇÃO DOS ITENS DA TABELA DE TIPOS
 # =========================
+# nesta parte adiciono o tipo de ocorrência à transação.
+# uma mesma ocorrência pode ter mais de um tipo, então todos os tipos válidos
+# são adicionados ao conjunto de itens daquela ocorrência.
 for _, linha in df_tipo_sel.iterrows():
     codigo = linha["codigo_ocorrencia"]
 
@@ -419,8 +608,11 @@ for _, linha in df_tipo_sel.iterrows():
 
 
 # =========================
-# ITENS DA TABELA AERONAVE
+# ADIÇÃO DOS ITENS DA TABELA DE AERONAVES
 # =========================
+# aqui adiciono informações da aeronave associada à ocorrência.
+# mantive fase de operação e nível de dano porque são atributos interpretáveis
+# e úteis para relacionar o contexto da ocorrência com possíveis fatores contribuintes.
 for _, linha in df_aeronave_sel.iterrows():
     codigo = linha["codigo_ocorrencia"]
 
@@ -428,9 +620,7 @@ for _, linha in df_aeronave_sel.iterrows():
         continue
 
     itens = {
-        #"Tipo_veiculo": linha["aeronave_tipo_veiculo"],
         "Fase_operacao": linha["aeronave_fase_operacao"],
-        #"Tipo_operacao": linha["aeronave_tipo_operacao"],
         "Nivel_dano": linha["aeronave_nivel_dano"]
     }
 
@@ -442,8 +632,11 @@ for _, linha in df_aeronave_sel.iterrows():
 
 
 # =========================
-# ITENS DA TABELA FATOR CONTRIBUINTE
+# ADIÇÃO DOS ITENS DA TABELA DE FATORES CONTRIBUINTES
 # =========================
+# nesta seção adiciono os fatores contribuintes às transações.
+# esses itens são fundamentais para a análise final, porque o objetivo principal
+# é encontrar características que apareçam associadas a determinados fatores.
 for _, linha in df_fator_sel.iterrows():
     codigo = linha["codigo_ocorrencia"]
 
@@ -457,11 +650,11 @@ for _, linha in df_fator_sel.iterrows():
 
 
 # =========================
-# LISTA FINAL DE TRANSAÇÕES
+# CRIAÇÃO DA LISTA FINAL DE TRANSAÇÕES GERAIS
 # =========================
-
-# regras gerais:
-# usa apenas características da ocorrência, sem fatores contribuintes
+# as transações gerais usam apenas características da ocorrência, sem fatores.
+# pensei em separar essa etapa porque regras gerais podem mostrar relações internas
+# da base, mas não são o foco principal da interpretação final do TCC.
 transacoes_gerais = []
 
 for itens in transacoes_dict.values():
@@ -474,8 +667,12 @@ for itens in transacoes_dict.values():
         transacoes_gerais.append(itens_sem_fator)
 
 
-# regras com fator:
-# usa apenas ocorrências que possuem fator contribuinte registrado
+# =========================
+# CRIAÇÃO DA LISTA FINAL DE TRANSAÇÕES COM FATORES
+# =========================
+# aqui mantenho apenas ocorrências que possuem pelo menos um fator contribuinte registrado.
+# isso é necessário porque, para gerar regras com fator como consequente, a transação
+# precisa conter algum item do tipo Fator.
 transacoes_com_fator = [
     list(itens)
     for itens in transacoes_dict.values()
@@ -483,18 +680,42 @@ transacoes_com_fator = [
 ]
 
 
-print("\n==============================")
-print("RESUMO DAS TRANSAÇÕES")
-print("==============================")
-print("Total de ocorrências:", len(transacoes_dict))
-print("Transações gerais:", len(transacoes_gerais))
-print("Transações com pelo menos um fator:", len(transacoes_com_fator))
+# =========================
+# RESUMO DAS TRANSAÇÕES
+# =========================
+# como removi os prints do terminal, salvo um resumo em CSV.
+# esse arquivo ajuda a conferir quantas ocorrências viraram transações em cada análise.
+resumo_transacoes = pd.DataFrame(
+    [
+        {
+            "metrica": "total_ocorrencias_base",
+            "valor": len(transacoes_dict)
+        },
+        {
+            "metrica": "transacoes_gerais",
+            "valor": len(transacoes_gerais)
+        },
+        {
+            "metrica": "transacoes_com_pelo_menos_um_fator",
+            "valor": len(transacoes_com_fator)
+        }
+    ]
+)
+
+resumo_transacoes.to_csv(
+    pasta_csvs + "resumo_transacoes_apriori.csv",
+    index=False,
+    encoding="utf-8-sig"
+)
 
 
 # =========================
-# REGRAS GERAIS
+# GERAÇÃO DAS REGRAS GERAIS
 # =========================
-itens_freq_gerais, regras_gerais, suporte_usado_geral, df_transacoes_gerais = gerar_regras(
+# aqui gero regras sem fatores contribuintes.
+# elas são mantidas como uma análise complementar, mas a interpretação principal
+# do trabalho fica nas regras em que o consequente é um fator contribuinte.
+itens_freq_gerais, regras_gerais, suporte_usado_geral, df_transacoes_gerais, historico_geral = gerar_regras(
     transacoes=transacoes_gerais,
     lista_suportes=SUPORTES_GERAIS,
     min_conf=MIN_CONF_GERAL,
@@ -504,9 +725,12 @@ itens_freq_gerais, regras_gerais, suporte_usado_geral, df_transacoes_gerais = ge
 
 
 # =========================
-# REGRAS COM FATOR COMO CONSEQUENTE
+# GERAÇÃO DAS REGRAS EM TRANSAÇÕES COM FATOR
 # =========================
-itens_freq_fatores, regras_fatores_todas, suporte_usado_fator, df_transacoes_fatores = gerar_regras(
+# nesta etapa gero regras usando apenas transações que possuem fatores.
+# ainda assim, depois faço um filtro adicional para garantir que o consequente
+# da regra seja um fator contribuinte.
+itens_freq_fatores, regras_fatores_todas, suporte_usado_fator, df_transacoes_fatores, historico_fator = gerar_regras(
     transacoes=transacoes_com_fator,
     lista_suportes=SUPORTES_FATORES,
     min_conf=MIN_CONF_FATOR,
@@ -514,6 +738,16 @@ itens_freq_fatores, regras_fatores_todas, suporte_usado_fator, df_transacoes_fat
     nome_analise="REGRAS EM TRANSAÇÕES COM FATOR"
 )
 
+
+# =========================
+# FILTRO FINAL DAS REGRAS COM FATOR COMO CONSEQUENTE
+# =========================
+# aqui eu mantenho apenas regras do tipo:
+# característica da ocorrência => fator contribuinte.
+#
+# pensei em fazer esse filtro porque uma regra com fator no antecedente seria menos útil
+# para o objetivo do trabalho. o interesse é observar quais características aparecem
+# associadas a determinados fatores contribuintes, e não o contrário.
 if not regras_fatores_todas.empty:
     regras_fatores = regras_fatores_todas[
         regras_fatores_todas["consequents"].apply(
@@ -534,51 +768,66 @@ else:
 
 
 # =========================
-# EXPORTAÇÃO DOS RESULTADOS
+# PREPARAÇÃO DOS RESULTADOS PARA EXPORTAÇÃO
 # =========================
+# antes de salvar os resultados, converto os itemsets e as regras para uma forma
+# mais legível. isso facilita abrir os arquivos no Excel, no VS Code ou usar os dados
+# diretamente nas tabelas da monografia.
 regras_gerais_export = preparar_exportacao(regras_gerais)
 regras_fatores_export = preparar_exportacao(regras_fatores)
 
 itens_freq_gerais_export = preparar_itemsets_exportacao(itens_freq_gerais)
 itens_freq_fatores_export = preparar_itemsets_exportacao(itens_freq_fatores)
 
+
+# =========================
+# EXPORTAÇÃO DAS REGRAS
+# =========================
+# salvo as regras em arquivos separados.
+# as regras com fatores são as mais importantes para a discussão final do trabalho.
 regras_gerais_export.to_csv(
-    "regras_associacao_gerais.csv",
+    pasta_csvs + "regras_associacao_gerais.csv",
     index=False,
     encoding="utf-8-sig",
     float_format="%.4f"
 )
 
 regras_fatores_export.to_csv(
-    "CSVs/regras_associacao_fatores.csv",
+    pasta_csvs + "regras_associacao_fatores.csv",
     index=False,
     encoding="utf-8-sig",
     float_format="%.4f"
 )
 
 regras_gerais_export.head(20).to_csv(
-    "CSVs/top20_regras_gerais.csv",
+    pasta_csvs + "top20_regras_gerais.csv",
     index=False,
     encoding="utf-8-sig",
     float_format="%.4f"
 )
 
 regras_fatores_export.head(20).to_csv(
-    "CSVs/top20_regras_fatores.csv",
+    pasta_csvs + "top20_regras_fatores.csv",
     index=False,
     encoding="utf-8-sig",
     float_format="%.4f"
 )
 
+
+# =========================
+# EXPORTAÇÃO DOS ITEMSETS FREQUENTES
+# =========================
+# além das regras, salvo os itemsets frequentes que serviram de base para gerá-las.
+# isso é útil para conferir quais combinações passaram pelo critério de suporte.
 itens_freq_gerais_export.to_csv(
-    "CSVs/itemsets_frequentes_gerais.csv",
+    pasta_csvs + "itemsets_frequentes_gerais.csv",
     index=False,
     encoding="utf-8-sig",
     float_format="%.4f"
 )
 
 itens_freq_fatores_export.to_csv(
-    "CSVs/itemsets_frequentes_fatores.csv",
+    pasta_csvs + "itemsets_frequentes_fatores.csv",
     index=False,
     encoding="utf-8-sig",
     float_format="%.4f"
@@ -586,37 +835,50 @@ itens_freq_fatores_export.to_csv(
 
 
 # =========================
-# EXIBIÇÃO NO TERMINAL
+# EXPORTAÇÃO DO HISTÓRICO DE EXECUÇÃO
 # =========================
-print("\n==============================")
-print("TOP 20 REGRAS GERAIS")
-print("==============================")
+# como não há mais prints no terminal, salvo também um histórico das tentativas
+# de suporte mínimo. esse arquivo mostra qual suporte foi testado e se gerou regras.
+historico_execucao = pd.concat(
+    [
+        historico_geral,
+        historico_fator
+    ],
+    ignore_index=True
+)
 
-if regras_gerais_export.empty:
-    print("Nenhuma regra geral encontrada.")
-else:
-    print(regras_gerais_export.head(20).to_string(index=False))
-
-
-print("\n==============================")
-print("TOP 20 REGRAS COM FATOR COMO CONSEQUENTE")
-print("==============================")
-
-if regras_fatores_export.empty:
-    print("Nenhuma regra com fator como consequente encontrada.")
-else:
-    print(regras_fatores_export.head(20).to_string(index=False))
+historico_execucao.to_csv(
+    pasta_csvs + "resumo_execucao_apriori.csv",
+    index=False,
+    encoding="utf-8-sig"
+)
 
 
-print("\n==============================")
-print("ARQUIVOS GERADOS")
-print("==============================")
-print("- regras_associacao_gerais.csv")
-print("- regras_associacao_fatores.csv")
-print("- top20_regras_gerais.csv")
-print("- top20_regras_fatores.csv")
-print("- itemsets_frequentes_gerais.csv")
-print("- itemsets_frequentes_fatores.csv")
+# =========================
+# RESUMO DOS SUPORTES UTILIZADOS
+# =========================
+# este arquivo guarda diretamente o suporte final usado em cada análise.
+# isso ajuda a justificar os parâmetros utilizados na apresentação e na monografia.
+resumo_suportes = pd.DataFrame(
+    [
+        {
+            "analise": "regras_gerais",
+            "suporte_usado": suporte_usado_geral,
+            "min_conf": MIN_CONF_GERAL,
+            "min_lift": MIN_LIFT_GERAL
+        },
+        {
+            "analise": "regras_com_fatores",
+            "suporte_usado": suporte_usado_fator,
+            "min_conf": MIN_CONF_FATOR,
+            "min_lift": MIN_LIFT_FATOR
+        }
+    ]
+)
 
-print("\nSuporte usado nas regras gerais:", suporte_usado_geral)
-print("Suporte usado nas regras com fatores:", suporte_usado_fator)
+resumo_suportes.to_csv(
+    pasta_csvs + "resumo_suportes_apriori.csv",
+    index=False,
+    encoding="utf-8-sig",
+    float_format="%.4f"
+)
