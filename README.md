@@ -1,40 +1,45 @@
-# Análise de Ocorrências Aeronáuticas com Dados Abertos do CENIPA
-
-Este repositório contém os códigos desenvolvidos para o Trabalho de Conclusão de Curso em Engenharia de Computação, cujo objetivo é realizar uma análise exploratória de dados públicos de ocorrências aeronáuticas da aviação civil brasileira, disponibilizados pelo CENIPA por meio da base OpenData AIG Brazil.
-
-O projeto busca identificar padrões relacionados aos tipos de ocorrência, fatores contribuintes e aspectos temporais dos eventos registrados. Além disso, aplica regras de associação utilizando o algoritmo Apriori, com foco em encontrar combinações de características associadas a fatores contribuintes.
-
-## Objetivos
-
-- Realizar a leitura, limpeza e integração dos arquivos CSV da base do CENIPA;
-- Identificar os tipos de ocorrência mais frequentes;
-- Analisar fatores contribuintes associados a determinados tipos de ocorrência;
-- Investigar a distribuição temporal de ocorrências de colisão com ave;
-- Aplicar regras de associação com o algoritmo Apriori;
-- Avaliar limitações da base e dos padrões encontrados.
-
-## Base de Dados
-
-A base utilizada é a OpenData AIG Brazil, disponibilizada pelo Centro de Investigação e Prevenção de Acidentes Aeronáuticos (CENIPA). Os principais arquivos utilizados foram:
-
-- `ocorrencia.csv`
-- `ocorrencia_tipo.csv`
-- `aeronave.csv`
-- `fator_contribuinte.csv`
-
-Esses arquivos contêm informações sobre ocorrências aeronáuticas, aeronaves envolvidas, tipos de ocorrência e fatores contribuintes registrados em investigações finalizadas.
-
 ## Estrutura do Projeto
+
+A organização do repositório foi definida de forma a separar os códigos-fonte, os arquivos de entrada, os resultados em CSV e as imagens geradas durante as análises.
 
 ```text
 .
+├── main.py
+├── apriori.py
+├── bird_strike.py
+├── ocorrencia_fatores.py
+├── README.md
+│
 ├── Recursos/
 │   ├── ocorrencia.csv
 │   ├── ocorrencia_tipo.csv
 │   ├── aeronave.csv
 │   └── fator_contribuinte.csv
-├── main.py
-├── bird_strike.py
-├── apriori.py
-├── README.md
-└── ...
+│
+├── Imagens/
+│   ├── grafico_top5_tipos_ocorrencia.png
+│   ├── ocorrencias_bird_por_mes.png
+│   ├── ocorrencias_bird_por_hora.png
+│   ├── ocorrencias_bird_por_mes_2023_2025.png
+│   └── heatmap_bird_mes_hora.png
+│
+└── CSVs/
+    ├── regras_associacao_fatores.csv
+    ├── top20_regras_fatores.csv
+    ├── itemsets_frequentes_fatores.csv
+    └── demais resultados gerados pelas análises
+```
+
+### Descrição das pastas
+
+* `Recursos/`: contém os arquivos CSV originais utilizados como entrada nas análises.
+* `Imagens/`: armazena os gráficos e visualizações gerados pelos scripts.
+* `CSVs/`: contém os arquivos CSV produzidos como resultado das análises.
+* Arquivos `.py`: contêm os códigos responsáveis pelo processamento, análise exploratória, estudo de colisões com ave e aplicação do algoritmo Apriori.
+
+### Scripts principais
+
+* `ocorrencia_fatores.py`: analisa os fatores contribuintes associados aos principais tipos de ocorrência.
+* `bird_strike.py`: realiza a análise específica das ocorrências de colisão com ave, incluindo gráficos por mês, por hora e mapa de calor.
+* `apriori.py`: aplica o algoritmo Apriori para geração de regras de associação envolvendo fatores contribuintes.
+
