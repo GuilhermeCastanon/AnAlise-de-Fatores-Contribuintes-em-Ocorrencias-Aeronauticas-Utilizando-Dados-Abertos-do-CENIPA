@@ -361,7 +361,7 @@ plt.xlabel("Quantidade de ocorrências")
 plt.ylabel("Tipo de ocorrência")
 
 plt.tight_layout()
-plt.savefig("grafico_top5_tipos_ocorrencia.png", dpi=300)
+plt.savefig("Imagens/grafico_top5_tipos_ocorrencia.png", dpi=300)
 plt.show()
 
 
@@ -381,5 +381,5 @@ plt.xlabel("% com fator contribuinte registrado")
 plt.ylabel("Tipo de ocorrência")
 
 plt.tight_layout()
-plt.savefig("grafico_cobertura_fatores_top5_tipos.png", dpi=300)
+plt.savefig("Imagens/grafico_cobertura_fatores_top5_tipos.png", dpi=300)
 plt.show()

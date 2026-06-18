@@ -550,35 +550,35 @@ regras_gerais_export.to_csv(
 )
 
 regras_fatores_export.to_csv(
-    "regras_associacao_fatores.csv",
+    "CSVs/regras_associacao_fatores.csv",
     index=False,
     encoding="utf-8-sig",
     float_format="%.4f"
 )
 
 regras_gerais_export.head(20).to_csv(
-    "top20_regras_gerais.csv",
+    "CSVs/top20_regras_gerais.csv",
     index=False,
     encoding="utf-8-sig",
     float_format="%.4f"
 )
 
 regras_fatores_export.head(20).to_csv(
-    "top20_regras_fatores.csv",
+    "CSVs/top20_regras_fatores.csv",
     index=False,
     encoding="utf-8-sig",
     float_format="%.4f"
 )
 
 itens_freq_gerais_export.to_csv(
-    "itemsets_frequentes_gerais.csv",
+    "CSVs/itemsets_frequentes_gerais.csv",
     index=False,
     encoding="utf-8-sig",
     float_format="%.4f"
 )
 
 itens_freq_fatores_export.to_csv(
-    "itemsets_frequentes_fatores.csv",
+    "CSVs/itemsets_frequentes_fatores.csv",
     index=False,
     encoding="utf-8-sig",
     float_format="%.4f"

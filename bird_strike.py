@@ -229,7 +229,7 @@ ax.set_ylabel("Quantidade de ocorrências", fontsize=13)
 ax.grid(True, linestyle="--", alpha=0.4)
 
 plt.tight_layout()
-plt.savefig("ocorrencias_bird_por_mes.png", dpi=300)
+plt.savefig("Imagens/ocorrencias_bird_por_mes.png", dpi=300)
 plt.show()
 
 
@@ -302,7 +302,7 @@ plt.grid(True, linestyle="--", alpha=0.4)
 plt.legend(title="Ano")
 
 plt.tight_layout()
-plt.savefig("ocorrencias_bird_por_mes_2023_2025.png", dpi=300)
+plt.savefig("Imagens/ocorrencias_bird_por_mes_2023_2025.png", dpi=300)
 plt.show()
 
 
@@ -349,7 +349,7 @@ ax.set_xticks(horas)
 ax.grid(True, linestyle="--", alpha=0.4)
 
 plt.tight_layout()
-plt.savefig("ocorrencias_bird_por_hora.png", dpi=300)
+plt.savefig("Imagens/ocorrencias_bird_por_hora.png", dpi=300)
 plt.show()
 
 
@@ -427,7 +427,7 @@ plt.xticks(rotation=0)
 plt.yticks(rotation=0)
 
 plt.tight_layout()
-plt.savefig("heatmap_bird_mes_hora.png", dpi=300)
+plt.savefig("Imagens/heatmap_bird_mes_hora.png", dpi=300)
 plt.show()
 
 print("\nOcorrências de bird strike por ano:")
